@@ -1,0 +1,16 @@
+[submodule "controller_tuner"]
+	path = controller_tuner
+	url = https://github.com/erts-RnD/controller_tuner.git
+	branch = ros2
+[submodule "mav_comm"]
+	path = mav_comm
+	url = https://github.com/arunser/mav_comm.git
+	branch = ros2
+[submodule "rotors_simulator"]
+	path = rotors_simulator
+	url = https://github.com/arunser/rotors_simulator.git
+	branch = rotors2
+[submodule "whycode-ros2"]
+	path = whycode-ros2
+	url = git@github.com:jforjoe/whycode-ros2.git
+	branch = humble-public

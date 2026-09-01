@@ -1,0 +1,165 @@
+<mujoco model="swift_pico">
+
+  <option gravity="0 0 -9.81" timestep="0.005" integrator="RK4"/>
+
+  <visual>
+    <!-- Headlight follows the active camera — at z=20 pointing down it acts as overhead sun -->
+    <headlight ambient="0.7 0.7 0.7" diffuse="0.9 0.9 0.9" specular="0.1 0.1 0.1"/>
+    <rgba haze="0.0 0.0 0.0 1"/>
+    <global azimuth="120" elevation="-20" offwidth="1000" offheight="1000"/>
+  </visual>
+
+  <asset>
+    <!-- ── Skybox / floor ── -->
+    <texture type="skybox" builtin="gradient" rgb1="0.4 0.6 0.8" rgb2="0 0 0"
+             width="512" height="512"/>
+    <!-- Dark floor: with 3 lights all pointing down, material rgba=0.8 clips to
+         pure white (255).  rgba=0.15 gives ~127 (mid-gray) after lighting so the
+         white WhyCon ring (255) has clear contrast against the background. -->
+    <material name="floor_mat" rgba="0.15 0.15 0.15 1" reflectance="0.0"/>
+
+    <!--
+      Swift Pico meshes (original .dae → .obj conversion).
+      Scales match the real Swift Pico hardware exactly:
+        body + motor meshes: scale 5 5 5
+        whycode marker:      scale 0.5 0.5 0.5
+
+      Motor visual offsets (visual pose (0,0,0.1) relative to motor link):
+        m1 (FR): link at (0.19,-0.19,-0.12)  → visual at (0.19,-0.19,-0.02)
+        m2 (BL): link at (-0.19,0.19,-0.12)  → visual at (-0.19,0.19,-0.02)
+        m3 (FL): link at (0.19,0.19,-0.12)   → visual at (0.19,0.19,-0.02)
+        m4 (BR): link at (-0.19,-0.19,-0.12) → visual at (-0.19,-0.19,-0.02)
+
+      Material colors:
+        base_link: black  (0 0 0)
+        m1, m3:    magenta (1 0 1)
+        m2:        red     (1 0 0)
+        m4:        yellow  (1 1 0)
+    -->
+    <mesh name="base_link" file="meshes/base_link.obj" scale="5 5 5"/>
+    <mesh name="m1_link"   file="meshes/m1_link.obj"   scale="5 5 5"/>
+    <mesh name="m4_link"   file="meshes/m4_link.obj"   scale="5 5 5"/>
+
+    <!-- WhyCode ID 1 marker generated with whycode-generator: whycode_gen 3,
+         keeping the white outer circle like the original WhyCon marker.
+         The mesh's native radius is 0.313 m, so scale 0.5 gives the same
+         0.313 m full white-outer diameter as the previous WhyCon marker.
+         The detector calibration parameter remains 0.38, matching the old
+         pipeline's effective z scale. -->
+    <mesh name="whycode_marker" file="meshes/whycon_marker.obj" scale="0.5 0.5 0.5"/>
+    <texture name="whycode_marker_tex" type="2d" file="meshes/textures/whycode_marker_1.png"/>
+    <material name="whycode_marker_mat" texture="whycode_marker_tex"
+              specular="0.0" shininess="0.0" reflectance="0.0"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 10" dir="0 0 -1" directional="true"
+           diffuse="0.9 0.9 0.9" specular="0.1 0.1 0.1"/>
+    <light pos="0 0 20" dir="0 0 -1" directional="true"
+           diffuse="0.8 0.8 0.8" specular="0.0 0.0 0.0" castshadow="false"/>
+    <geom name="floor" type="plane" size="20 20 0.1" material="floor_mat"
+          contype="1" conaffinity="1"/>
+
+    <!--
+      Top-down whycon camera — matches the real camera: pos=(0,0,20), pitch=90°, fov=60°.
+      MuJoCo camera looks along -Z_cam.
+      xyaxes: X_cam = world +X (image right = +X),  Y_cam = world +Y (image up = +Y → image down = -Y = whycon +Y)
+      Pixel projection at drone z: px = W/2 + wx*scale, py = H/2 - wy*scale
+    -->
+    <camera name="top_cam" pos="0 0 20" xyaxes="1 0 0 0 1 0" fovy="60"/>
+
+    <body name="drone" pos="0 0 0.3">
+      <freejoint name="drone_freejoint"/>
+
+      <!-- Physics collision box (matches SDF: 0.47×0.47×0.11 at z=-0.12) -->
+      <inertial mass="1.5" pos="0 0 0"
+                fullinertia="0.0347563 0.07 0.0977 0 0 0"/>
+      <geom name="body_col" type="box" size="0.235 0.235 0.055" pos="0 0 -0.12"
+            rgba="0 0 0 0" contype="1" conaffinity="1"/>
+
+      <!-- ── Visual meshes (no collision) ── -->
+
+      <!-- Main body (SDF: base_link.dae @ scale 5, black, pose 0 0 0).
+           z=-0.029: mesh's lowest vertex (z=-0.02919995 @ scale 5 = -0.146) sits
+           above the collision box's resting bottom (-0.175), so the whole visual
+           assembly (body + props + marker) is shifted down to touch the ground. -->
+      <geom name="body_vis" type="mesh" mesh="base_link" pos="0 0 -0.029"
+            rgba="0.05 0.05 0.05 1" contype="0" conaffinity="0"/>
+
+      <!--
+        Spinning propeller bodies — each is a child of the drone body with a
+        free hinge on the Z axis. The sim loop sets qvel on these joints each
+        step to match actual motor omega (computed from thrust force).
+        Directions: ccw motors (m1,m2) spin +Z, cw motors (m3,m4) spin -Z.
+        Visual offset: motor link at (x,y,-0.12) + SDF visual_offset (0,0,0.1)
+                       → propeller body at (x, y, -0.02)
+      -->
+
+      <!-- m1: front-right, ccw — dark gray so bright propeller edges do not
+           create circular ring patterns that confuse WhyCon's circle detector -->
+      <body name="prop_m1" pos="0.187 -0.187 -0.059">
+        <joint name="spin_m1" type="hinge" axis="0 0 1"
+               limited="false" damping="0" armature="0" frictionloss="0"/>
+        <geom name="m1_vis" type="mesh" mesh="m1_link"
+              rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
+      </body>
+
+      <!-- m2: back-left, ccw -->
+      <body name="prop_m2" pos="-0.187 0.187 -0.059">
+        <joint name="spin_m2" type="hinge" axis="0 0 1"
+               limited="false" damping="0" armature="0" frictionloss="0"/>
+        <geom name="m2_vis" type="mesh" mesh="m1_link"
+              rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
+      </body>
+
+      <!-- m3: front-left, cw -->
+      <body name="prop_m3" pos="0.187 0.187 -0.059">
+        <joint name="spin_m3" type="hinge" axis="0 0 1"
+               limited="false" damping="0" armature="0" frictionloss="0"/>
+        <geom name="m3_vis" type="mesh" mesh="m4_link"
+              rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
+      </body>
+
+      <!-- m4: back-right, cw -->
+      <body name="prop_m4" pos="-0.187 -0.187 -0.059">
+        <joint name="spin_m4" type="hinge" axis="0 0 1"
+               limited="false" damping="0" armature="0" frictionloss="0"/>
+        <geom name="m4_vis" type="mesh" mesh="m4_link"
+              rgba="0.15 0.15 0.15 1" contype="0" conaffinity="0"/>
+      </body>
+
+      <!-- WhyCode marker ID 1. -->
+      <geom name="whycode_marker" type="mesh" mesh="whycode_marker"
+            material="whycode_marker_mat" pos="0 0 -0.026"
+            contype="0" conaffinity="0"/>
+
+      <!-- ── Thrust sites (motor force application points) ── -->
+      <!-- m1 FR ccw: reactive yaw = -Km = -0.016 -->
+      <site name="thrust_m1" pos="0.19 -0.19 -0.12" size="0.01" rgba="1 0 0 0"/>
+      <!-- m2 BL ccw: reactive yaw = -Km -->
+      <site name="thrust_m2" pos="-0.19 0.19 -0.12" size="0.01" rgba="1 0 0 0"/>
+      <!-- m3 FL cw: reactive yaw = +Km = +0.016 -->
+      <site name="thrust_m3" pos="0.19 0.19 -0.12" size="0.01" rgba="0 0 1 0"/>
+      <!-- m4 BR cw: reactive yaw = +Km -->
+      <site name="thrust_m4" pos="-0.19 -0.19 -0.12" size="0.01" rgba="0 0 1 0"/>
+
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!--
+      Motor thrust actuators.
+      gear = [0 0 1 0 0 tz]: thrust (fz) + reactive yaw torque (tz).
+        ccw motors (m1, m2): tz = -Km = -0.016
+        cw  motors (m3, m4): tz = +Km = +0.016
+      ctrl = thrust force F_i [N], where F_i = Kt * omega_i^2
+      ctrlrange: 0 to Kt * omega_max^2 = 8.54858e-06 * 800^2 ≈ 5.47 N
+    -->
+    <motor name="m1" site="thrust_m1" gear="0 0 1 0 0 -0.016" ctrllimited="true" ctrlrange="0 5.47"/>
+    <motor name="m2" site="thrust_m2" gear="0 0 1 0 0 -0.016" ctrllimited="true" ctrlrange="0 5.47"/>
+    <motor name="m3" site="thrust_m3" gear="0 0 1 0 0  0.016" ctrllimited="true" ctrlrange="0 5.47"/>
+    <motor name="m4" site="thrust_m4" gear="0 0 1 0 0  0.016" ctrllimited="true" ctrlrange="0 5.47"/>
+  </actuator>
+  
+
+</mujoco>

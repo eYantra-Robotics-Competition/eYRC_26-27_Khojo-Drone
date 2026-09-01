@@ -1,0 +1,4 @@
+newmtl whycon
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+map_Kd textures/whycon_marker.png
