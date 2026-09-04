@@ -12,5 +12,5 @@
 	branch = rotors2
 [submodule "whycode-ros2"]
 	path = whycode-ros2
-	url = git@github.com:jforjoe/whycode-ros2.git
+	url = https://github.com/jforjoe/whycode-ros2.git
 	branch = humble-public
