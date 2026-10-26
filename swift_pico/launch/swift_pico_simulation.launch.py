@@ -55,20 +55,6 @@ def _launch_setup(context, *args, **kwargs):
         ],
     )
 
-    roll_pitch_yawrate_thrust_controller = Node(
-        package='rotors_control',
-        namespace='rotors',
-        executable='roll_pitch_yawrate_thrust_controller_node',
-        name='roll_pitch_yawrate_thrust_controller',
-    )
-
-    swift_interface = Node(
-        package='rotors_swift_interface',
-        namespace='rotors',
-        executable='rotors_swift_interface',
-        name='rotors_swift_interface'
-    )
-
     image_view = Node(
         package='image_view',
         executable='image_view',
@@ -86,8 +72,6 @@ def _launch_setup(context, *args, **kwargs):
     return [
         mujoco_bridge,
         whycode,
-        roll_pitch_yawrate_thrust_controller,
-        swift_interface,
         image_view,
     ]
 

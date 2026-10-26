@@ -1,99 +1,33 @@
 <mujoco model="khojo_arena">
-  <!-- Arena scene only: lights, floor, arena floor image, obstacles, ground
-       markers, and the top-down camera. No drone body/actuators here;
-       drone.xml pulls this in with <include file="arena.xml"/> and adds
-       the drone itself on top. -->
 
   <option gravity="0 0 -9.81" timestep="0.005" integrator="RK4"/>
 
   <visual>
-    <!-- Headlight follows the active camera — at z=20 pointing down it acts as overhead sun -->
+
     <headlight ambient="0.7 0.7 0.7" diffuse="0.9 0.9 0.9" specular="0.1 0.1 0.1"/>
     <rgba haze="0.0 0.0 0.0 1"/>
-    <!-- offwidth/offheight cap MuJoCo's offscreen framebuffer, so they must be
-         >= the bridge's CAM_W/CAM_H (config/mujoco_bridge.cpp). The bridge
-         renders top_cam at 1920x1920; raising CAM_W/CAM_H without raising
-         these two silently clamps the render. -->
+
     <global azimuth="120" elevation="-20" offwidth="1920" offheight="1920"/>
 
-    <!-- Render-cost trim. At 1920x1920 the offscreen pass is fill-bound, so
-         offsamples is the one that matters here:
-
-         offsamples 4 -> 0 drops 4x MSAA on the offscreen framebuffer. That is
-           4x less per-pixel shading work and a 4x smaller multisample
-           allocation on a 1920x1920 target.
-
-           !! RECALIBRATION REQUIRED !! MSAA is what currently softens the
-           marker's black-ring edge, and whycode's binarisation threshold sits
-           on that softened edge -- the same coupling that forced
-           circle_diameter 0.2713 -> 0.2443 when the shadow pass was disabled
-           (see the light comment below). With hard, aliased edges the
-           thresholded ring changes size again, so circle_diameter in
-           swift_pico_simulation.launch.py MUST be re-measured against ground
-           truth or every reported x/y/z is mis-scaled.
-
-         shadowsize 4096 -> 0 disables shadow mapping outright, so the 4096x4096
-           depth texture is never even allocated. No behaviour change: every
-           light in this file already carries castshadow="false", so the
-           shadow pass was already dead -- this just stops paying for the map.
-
-         numslices/numstacks/numquads only tessellate MuJoCo's builtin curved
-           primitives and boxes. The whycode marker is a textured *mesh*
-           (drone.xml) and the arena floor is a plane, so neither is affected;
-           the only geoms touched are the flat black box obstacles. Savings are
-           negligible at this resolution -- kept purely because they cost
-           nothing. -->
     <quality offsamples="0" shadowsize="0" numslices="14" numstacks="8" numquads="2"/>
   </visual>
 
   <asset>
-    <!-- ── Skybox / floor ── -->
+
     <texture type="skybox" builtin="gradient" rgb1="0.4 0.6 0.8" rgb2="0 0 0"
              width="512" height="512"/>
-    <!-- Dark floor: with 3 lights all pointing down, material rgba=0.8 clips to
-         pure white (255).  rgba=0.15 gives ~127 (mid-gray) after lighting so the
-         white WhyCon ring (255) has clear contrast against the background.
-         Only visible outside the arena patch below (large flight area beyond
-         the printed arena), so top_cam never actually sees this. -->
+
     <material name="floor_mat" rgba="0.15 0.15 0.15 1" reflectance="0.0"/>
 
-    <!-- Arena floor image, sized to exactly fill top_cam's view (a separate,
-         smaller patch laid on top of the big flat floor, not the floor itself).
-         Verified empirically: with the geom unrotated and top_cam's
-         xyaxes="1 0 0 0 1 0", the texture renders with no flip needed —
-         image top-left/top-right/bottom-left/bottom-right map exactly to
-         what top_cam sees, so the file can be dropped in as-is.
-
-         Sizing: top_cam is at height 15 with fovy=60, so its view footprint
-         has half-width = 15*tan(30deg) = 8.6603 m. The arena_floor geom below
-         is sized to that exact half-extent so the image fills the camera
-         frame edge-to-edge — one full arena, no zoom-crop, no tiling.
-
-         texrepeat gotcha: with texuniform="true" on a plane, MuJoCo tiles
-         the texture every 2 world-units per texrepeat unit, REGARDLESS of
-         the geom's own size. To get exactly one copy spanning a geom of
-         half-extent H, texrepeat must be 1/H (here H=8.6603 -> 0.11547).
-         If the arena_floor geom's size changes, update texrepeat to match. -->
     <texture name="arena_tex" type="2d" file="meshes/textures/Khojo_Arena.png"/>
     <material name="arena_mat" texture="arena_tex" texuniform="true" texrepeat="0.11547 0.11547"
               rgba="1 1 1 1  " reflectance="0.0"/>
 
-    <!-- Flat equilateral-triangle floor marker, side 1m. MuJoCo has no
-         triangular-prism primitive, so this is a thin (0.01m) hand-built
-         mesh instead (see meshes/triangle_marker.obj). -->
     <mesh name="triangle_marker" file="meshes/triangle_marker.obj"/>
   </asset>
 
   <worldbody>
-    <!-- castshadow="false": the light itself is unchanged (same pos/dir/
-         diffuse/specular, so it still lights the scene)  only the shadow-map
-         pass is dropped. That pass is a 4096x4096 render (mjVisual.quality.
-         shadowsize) costing ~15 ms/frame, and it barely scales with camera
-         resolution, so it dominates the frame budget. It contributes nothing
-         to marker detection: the WhyCode marker faces up and is never
-         shadowed. NOTE: it grows the thresholded ring 624 -> 682 px (+4.5%
-         linear), so whycode's circle_diameter must go 0.2713 -> ~0.284 or
-         every reported x/y/z reads ~4.5% small. -->
+
     <light pos="0 0 10" dir="0 0 -1" directional="true" castshadow="false"
            diffuse="0.9 0.9 0.9" specular="0.1 0.1 0.1"/>
     <light pos="0 0 20" dir="0 0 -1" directional="true"
@@ -101,52 +35,9 @@
     <geom name="floor" type="plane" size="20 20 0.1" material="floor_mat"
           contype="1" conaffinity="1"/>
 
-    <!-- Arena image patch, sized to exactly fill top_cam's view (see asset
-         comment above for the math). Visual only — the "floor" geom above
-         still handles collision for the whole flight area. -->
     <geom name="arena_floor" type="plane" size="8.6603 8.6603 0.01" pos="0 0 0.001"
           material="arena_mat" contype="0" conaffinity="0"/>
 
-    <!-- Flat ground markers: red triangles only, snapped to the PRINTED
-         grid's true intersections. The 13x13 line grid is NOT the full
-         arena_floor width  Khojo_Arena.png has a white title/footer border
-         baked into the texture, so the actual grid only spans the inner
-         ~1600px of the 1920px texture (measured from the texture's own
-         grid-line pixels: spacing = 133.4px @ 1920px-wide texture =
-         17.320508m -> 1.203414m/interval; confirmed against the live
-         top_cam render too).
-
-         IMPORTANT: only the 11x11 INTERIOR intersections are actually named
-         on the printed grid  see the official reference at
-         Khojo-Drone-2627/Tasks/dev/src/assets/stage_1/task_1/task1a/lattice_reference.jpg.
-         Columns are labeled A-K (left->right) and rows 1-11 (top->bottom);
-         the outermost ring of intersections (row 0/12, or col before A /
-         after K) sits on the arena border and has no name/label, so markers
-         must never be placed there. Row 6 / col F = center = world (0,0).
-         col_index: A=0 .. K=10.
-         world_x = (col_index-5)*1.203414, world_y = (6-row)*1.203414
-         for row 1-11, col A-K. See custom_files/scripts/grid_to_xy.py.
-         Coordinates below cross-checked against
-         swift_pico/scripts/grid_whycode_coordinates.csv. No obstacles, no
-         circles -- four triangles only, one picked at random from each of
-         the four quadrants around the center (F6), each within a Chebyshev
-         radius of 2 intersections, so the set spreads around center instead
-         of clustering on one side. -->
-    <geom name="obstacle_triangle_1" type="mesh" mesh="triangle_marker" pos="2.406828 1.203414 0.005"
-          rgba="1 0 0 1" contype="0" conaffinity="0"/> <!-- H5 (NE) -->
-    <geom name="obstacle_triangle_2" type="mesh" mesh="triangle_marker" pos="2.406828 -1.203414 0.005"
-          rgba="1 0 0 1" contype="0" conaffinity="0"/> <!-- H7 (SE) -->
-    <geom name="obstacle_triangle_3" type="mesh" mesh="triangle_marker" pos="-1.203414 2.406828 0.005"
-          rgba="1 0 0 1" contype="0" conaffinity="0"/> <!-- E4 (NW) -->
-    <geom name="obstacle_triangle_4" type="mesh" mesh="triangle_marker" pos="-2.406828 -1.203414 0.005"
-          rgba="1 0 0 1" contype="0" conaffinity="0"/> <!-- D7 (SW) -->
-
-    <!--
-      Top-down whycon camera — matches the real camera: pos=(0,0,15), pitch=90°, fov=60°.
-      MuJoCo camera looks along -Z_cam.
-      xyaxes: X_cam = world +X (image right = +X),  Y_cam = world +Y (image up = +Y → image down = -Y = whycon +Y)
-      Pixel projection at drone z: px = W/2 + wx*scale, py = H/2 - wy*scale
-    -->
     <camera name="top_cam" pos="0 0 15" xyaxes="1 0 0 0 1 0" fovy="60"/>
   </worldbody>
 </mujoco>
